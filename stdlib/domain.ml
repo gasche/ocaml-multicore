@@ -60,27 +60,31 @@ module DLS = struct
 
   let _ = create_dls ()
 
-  type 'a key = int * (unit -> 'a)
+  type 'a key = int
 
-  let key_counter = Atomic.make 0
+  let key_generator =
+    let counter = Atomic.make 0 in
+    fun () ->
+      Atomic.fetch_and_add counter 1
 
-  type key_initializer =
-    KI: 'a key * ('a -> 'a) -> key_initializer
+  type key_data =
+    KD: {
+      init: unit -> 'a;
+      split_from_parent: ('a -> 'a) option;
+    } -> key_data
 
-  let parent_keys = Atomic.make ([] : key_initializer list)
+  module IMap = Map.Make(Int)
+  let keys = Atomic.make (IMap.empty : key_data IMap.t)
 
-  let rec add_parent_key ki =
-    let l = Atomic.get parent_keys in
-    if not (Atomic.compare_and_set parent_keys l (ki :: l))
-    then add_parent_key ki
+  let rec add_parent_key k kd =
+    let l = Atomic.get keys in
+    if not (Atomic.compare_and_set keys l (IMap.add k kd l))
+    then add_parent_key k kd
 
-  let new_key ?split_from_parent init_orphan =
-    let idx = Atomic.fetch_and_add key_counter 1 in
-    let k = (idx, init_orphan) in
-    begin match split_from_parent with
-    | None -> ()
-    | Some split -> add_parent_key (KI(k, split))
-    end;
+  let new_key ?split_from_parent init =
+    let k = key_generator () in
+    let kd = KD { init; split_from_parent; } in
+    add_parent_key k kd;
     k
 
   (* If necessary, grow the current domain's local state array such that [idx]
@@ -100,27 +104,32 @@ module DLS = struct
       new_st
     end
 
-  let set (idx, _init) x =
+  let set idx x =
     let st = maybe_grow idx in
     (* [Sys.opaque_identity] ensures that flambda does not look at the type of
      * [x], which may be a [float] and conclude that the [st] is a float array.
      * We do not want OCaml's float array optimisation kicking in here. *)
     st.(idx) <- Obj.repr (Sys.opaque_identity x)
 
-  let get (idx, init) =
+  let get idx =
     let st = maybe_grow idx in
     let v = st.(idx) in
     if v == unique_value then
+      let KD {init; _} = IMap.find idx (Atomic.get keys) in
       let v' = Obj.repr (init ()) in
       st.(idx) <- (Sys.opaque_identity v');
-      Obj.magic v'
+      Obj.obj v'
     else Obj.magic v
 
   let get_initial_keys () : (int * Obj.t) list =
-    List.map
-      (fun (KI ((idx, _) as k, split)) ->
-           (idx, Obj.repr (split (get k))))
-      (Atomic.get parent_keys)
+    IMap.fold (fun idx (KD {split_from_parent; _}) initial_keys ->
+      match split_from_parent with
+      | None -> initial_keys
+      | Some split ->
+          let v_parent = get idx in
+          let v_child = Obj.repr (split v_parent) in
+          (idx, v_child) :: initial_keys
+    ) (Atomic.get keys) []
 
   let set_initial_keys (l: (int * Obj.t) list) =
     List.iter
