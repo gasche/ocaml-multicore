@@ -33,18 +33,12 @@
 
 static int obj_tag (value arg)
 {
-  header_t hd;
-
   if (Is_long (arg)) {
     return 1000;   /* int_tag */
   } else if ((long) arg & (sizeof (value) - 1)) {
     return 1002;   /* unaligned_tag */
   } else {
-    /* The acquire load ensures that reading the field of a Forward_tag
-       block in stdlib/camlinternalLazy.ml:force_gen has the necessary
-       synchronization. */
-    hd = (header_t)atomic_load_acq(Hp_atomic_val(arg));
-    return Tag_hd(hd);
+    return Tag_val(arg);
   }
 }
 
@@ -204,74 +198,6 @@ CAMLprim value caml_obj_compare_and_swap (value v, value f,
 CAMLprim value caml_obj_is_shared (value obj)
 {
   return Val_int(Is_long(obj) || !Is_young(obj));
-}
-
-/* The following functions are used to support lazy values. They are not
- * written in OCaml in order to ensure atomicity guarantees with respect to the
- * GC. */
-CAMLprim value caml_lazy_make_forward (value v)
-{
-  CAMLparam1 (v);
-  CAMLlocal1 (res);
-
-  res = caml_alloc_small (1, Forward_tag);
-  Field (res, 0) = v;
-  CAMLreturn (res);
-}
-
-static int obj_update_tag (value blk, int old_tag, int new_tag)
-{
-  header_t hd;
-  tag_t tag;
-
-  SPIN_WAIT {
-    hd = Hd_val(blk);
-    tag = Tag_hd(hd);
-
-    if (tag != old_tag) return 0;
-    if (caml_domain_alone()) {
-      Tag_val (blk) = new_tag;
-      return 1;
-    }
-
-    if (atomic_compare_exchange_strong(Hp_atomic_val(blk), &hd,
-                                       (hd & ~0xFF) | new_tag))
-      return 1;
-  }
-}
-
-CAMLprim value caml_lazy_reset_to_lazy (value v)
-{
-  CAMLassert (Tag_val(v) == Forcing_tag);
-
-  obj_update_tag (v, Forcing_tag, Lazy_tag);
-  return Val_unit;
-}
-
-CAMLprim value caml_lazy_update_to_forward (value v)
-{
-  CAMLassert (Tag_val(v) == Forcing_tag);
-
-  obj_update_tag (v, Forcing_tag, Forward_tag);
-  return Val_unit;
-}
-
-CAMLprim value caml_lazy_read_result (value v)
-{
-  if (obj_tag(v) == Forward_tag)
-    return Field(v,0);
-  return v;
-}
-
-CAMLprim value caml_lazy_update_to_forcing (value v)
-{
-  if (Is_block(v) && /* Needed to ensure that we don't attempt to update the
-                        header of a integer value */
-      obj_update_tag (v, Lazy_tag, Forcing_tag)) {
-    return Val_int(0);
-  } else {
-    return Val_int(1);
-  }
 }
 
 /* For mlvalues.h and camlinternalOO.ml

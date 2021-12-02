@@ -135,18 +135,14 @@ void caml_ephe_clean (value v) {
     child = Field(v, i);
   ephemeron_again:
     if (child != caml_ephe_none && Is_block(child)) {
-      if (Tag_val (child) == Forward_tag) {
-        value f = Forward_val (child);
-        if (Is_block(f)) {
-          if (Tag_val(f) == Forward_tag || Tag_val(f) == Lazy_tag ||
-              Tag_val(f) == Forcing_tag || Tag_val(f) == Double_tag) {
-            /* Do not short-circuit the pointer */
-          } else {
-            Field(v, i) = child = f;
-            if (Is_block (f) && Is_young (f))
-              add_to_ephe_ref_table(&Caml_state->minor_tables->ephe_ref, v, i);
-            goto ephemeron_again;
-          }
+      if (Tag_val (child) == Lazy_tag) {
+        value shortcut_val = caml_lazy_shortcut_val(child);
+        if (0 != shortcut_val) {
+          /* Short-circuit the pointer */
+          Field(v, i) = child = shortcut_val;
+          if (Is_block(shortcut_val) && Is_young(shortcut_val))
+            add_to_ephe_ref_table(&Caml_state->minor_tables->ephe_ref, v, i);
+          goto ephemeron_again;
         }
       }
       if (Tag_val (child) == Infix_tag) child -= Infix_offset_val (child);

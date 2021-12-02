@@ -176,7 +176,7 @@ CAMLexport uint32_t caml_hash_mix_string(uint32_t h, value s)
 
 /* Maximal size of the queue used for breadth-first traversal.  */
 #define HASH_QUEUE_SIZE 256
-/* Maximal number of Forward_tag links followed in one step */
+/* Maximal number of forward pointers followed in one step */
 #define MAX_FORWARD_DEREFERENCE 1000
 
 /* The generic hash function */
@@ -245,16 +245,6 @@ CAMLprim value caml_hash(value count, value limit, value seed, value obj)
            since we have no idea how to distinguish them. */
         h = 42;
         break;
-      case Forward_tag:
-        /* PR#6361: we can have a loop here, so limit the number of
-           Forward_tag links being followed */
-        for (i = MAX_FORWARD_DEREFERENCE; i > 0; i--) {
-          v = Forward_val(v);
-          if (Is_long(v) || Tag_val(v) != Forward_tag)
-            goto again;
-        }
-        /* Give up on this object and move to the next */
-        break;
       case Object_tag:
         h = caml_hash_mix_intnat(h, Oid_val(v));
         num--;
@@ -268,6 +258,22 @@ CAMLprim value caml_hash(value count, value limit, value seed, value obj)
           num--;
         }
         break;
+      case Lazy_tag:
+        /* PR#6361: we can have a loop here, so limit the number of
+           forward pointers being followed */
+        for (i = MAX_FORWARD_DEREFERENCE; i > 0; i--) {
+          value forward_val = caml_lazy_forward_val(v);
+          if (0 == forward_val) {
+            /* not a forward pointer */
+            break;
+          }
+          v = forward_val;
+        }
+        if (i == 0) {
+          /* Give up on this object and move to the next */
+          break;
+        }
+        /* fall through */
       default:
         /* Mix in the tag and size, but do not count this towards [num] */
         h = caml_hash_mix_uint32(h, Whitehd_hd(Hd_val(v)));

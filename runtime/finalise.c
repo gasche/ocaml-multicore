@@ -47,6 +47,11 @@ static void alloc_todo (caml_domain_state* d, int size)
   }
 }
 
+static void assert_block_and_not_forward(value v)
+{
+  CAMLassert(Is_block(v) && (Tag_val(v) != Lazy_tag || 0 == caml_lazy_forward_val(v)));
+}
+
 /* Find white finalisable values, move them to the finalising set, and
    darken them (if darken_value is true). */
 static void generic_final_update
@@ -77,8 +82,7 @@ static void generic_final_update
     alloc_todo (d, todo_count);
     j = k = 0;
     for (i = 0; i < final->old; i++){
-      CAMLassert (Is_block (final->table[i].val));
-      CAMLassert (Tag_val (final->table[i].val) != Forward_tag);
+      assert_block_and_not_forward(final->table[i].val);
       if (is_unmarked (final->table[i].val)) {
         /** dead */
         f->todo_tail->item[k] = final->table[i];
@@ -250,8 +254,7 @@ static void generic_final_minor_update
     k = 0;
     j = final->old;
     for (i = final->old; i < final->young; i++) {
-      CAMLassert (Is_block (final->table[i].val));
-      CAMLassert (Tag_val (final->table[i].val) != Forward_tag);
+      assert_block_and_not_forward(final->table[i].val);
       if (Is_young(final->table[j].val) &&
           caml_get_header_val(final->table[i].val) != 0) {
         /** dead */
@@ -345,8 +348,7 @@ static void generic_final_register (struct finalisable *final, value f, value v)
 #ifdef FLAT_FLOAT_ARRAY
       || Tag_val(v) == Double_tag
 #endif
-      || Tag_val(v) == Forcing_tag
-      || Tag_val(v) == Forward_tag) {
+      ) {
     caml_invalid_argument ("Gc.finalise");
   }
   CAMLassert (final->old <= final->young);

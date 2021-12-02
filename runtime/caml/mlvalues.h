@@ -221,18 +221,70 @@ bits  63        (64-P) (63-P)        10 9     8 7   0
 
 #define Is_block_and_young(val) (Is_block(val) && Is_young(val))
 
-/* NOTE: [Forward_tag] and [Infix_tag] must be just under
+/* NOTE: [Lazy_tag] and [Infix_tag] must be just under
    [No_scan_tag], with [Infix_tag] the lower one.
    See [caml_oldify_one] in minor_gc.c for more details.
 
    NOTE: Update stdlib/obj.ml whenever you change the tags.
  */
 
-/* Forward_tag: forwarding pointer that the GC may silently shortcut.
-   See stdlib/lazy.ml. */
-#define Forward_tag 250
-#define Forward_val(v) Field(v, 0)
+/* This tag is used to implement lazy values.
+   See major_gc.c and stdlib/lazy.ml. */
+#define Lazy_tag 250
+
+/* deprecated, use caml_lazy_forward_val instead
+
+   TODO: A number of packages relying on the representation are
+   affected by deprecation (and broken by multicore in any case), so
+   [caml_lazy_forward_val] should also be implemented in the
+   non-multicore branch. Code such as:
+
+     case Lazy_tag:
+       ...a...
+     case Forward_tag:
+       v = Forward_val(x);
+       ...b...
+
+   must be rewritten as:
+
+     case Lazy_tag:
+     case Forward_tag: {
+       value f = caml_lazy_forward_val(x);
+       if (0 == f) {
+         ...a...
+       } else {
+         v = f;
+         ...b...
+       }
+     }
+
+   to be compatible with both OCaml branches.
+
+ */
+#define Forward_tag 1003
+//#define Forward_val(v) Field(v, 0)
 /* FIXME: not immutable once shortcutting is implemented */
+
+/* Returns the value of a lazy if it is a forward pointer, 0
+   otherwise. */
+Caml_inline value caml_lazy_forward_val(value l)
+{
+  /* Forward : 'a CamlinternalLazy.thunk_status */
+  value val_forward = Val_int(1);
+  CAMLassert(Is_block(l) && Tag_val(l) == Lazy_tag);
+  if (Field(l, 0) != val_forward) return 0;
+  atomic_thread_fence(memory_order_acquire);
+  return Field(l, 1);
+}
+
+#ifdef CAML_INTERNALS
+
+// TODO: Where should I place this?
+/* Returns the value of a lazy if it is a forward pointer that can be
+   short-circuited, 0 otherwise. */
+value caml_lazy_shortcut_val(value l);
+
+#endif /* CAML_INTERNALS */
 
 /* If tag == Infix_tag : an infix header inside a closure */
 /* Infix_tag must be odd so that the infix header is scanned as an integer */
@@ -286,16 +338,8 @@ Caml_inline void* Ptr_val(value val)
   (((uintnat)(arity) << 24) + ((uintnat)(delta) << 1) + 1)
 #endif
 
-/* This tag is used (with Forcing_tag & Forward_tag) to implement lazy values.
-   See major_gc.c and stdlib/lazy.ml. */
-#define Lazy_tag 246
-
 /* Tag used for continuations (see fiber.c) */
-#define Cont_tag 245
-
-/* This tag is used (with Lazy_tag & Forward_tag) to implement lazy values.
- * See major_gc.c and stdlib/lazy.ml. */
-#define Forcing_tag 244
+#define Cont_tag 246
 
 /* Another special case: variants */
 CAMLextern value caml_hash_variant(char const * tag);

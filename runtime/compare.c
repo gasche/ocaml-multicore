@@ -101,6 +101,12 @@ static intnat compare_val(value v1, value v2, int total)
 
 /* Structural comparison */
 
+static int forward_lazy_value(value * v)
+{
+  value forward_val = caml_lazy_forward_val(*v);
+  if (0 != forward_val) *v = forward_val;
+  return 0 != forward_val;
+}
 
 #define LESS -1
 #define EQUAL 0
@@ -128,9 +134,9 @@ static intnat do_compare_val(struct compare_stack* stk,
         return Long_val(v1) - Long_val(v2);
       /* Subtraction above cannot overflow and cannot result in UNORDERED */
       switch (Tag_val(v2)) {
-      case Forward_tag:
-        v2 = Forward_val(v2);
-        continue;
+      case Lazy_tag:
+        if (forward_lazy_value(&v2)) continue;
+        break;
       case Custom_tag: {
         int res;
         int (*compare)(value v1, value v2) = Custom_ops_val(v2)->compare_ext;
@@ -148,9 +154,9 @@ static intnat do_compare_val(struct compare_stack* stk,
     }
     if (Is_long(v2)) {
       switch (Tag_val(v1)) {
-      case Forward_tag:
-        v1 = Forward_val(v1);
-        continue;
+      case Lazy_tag:
+        if (forward_lazy_value(&v1)) continue;
+        break;
       case Custom_tag: {
         int res;
         int (*compare)(value v1, value v2) = Custom_ops_val(v1)->compare_ext;
@@ -170,25 +176,20 @@ static intnat do_compare_val(struct compare_stack* stk,
     if (t1 != t2) {
         /* Besides long/block comparisons, the only forms of
            heterogeneous comparisons we support are:
-           - Forward_tag pointers, which may point to values of any type, and
+           - Forward pointers, which may point to values of any type, and
            - comparing Infix_tag and Closure_tag functions (#9521).
 
            Other heterogeneous cases may still happen due to
            existential types, and we just compare the tags.
         */
-        if (t1 == Forward_tag) { v1 = Forward_val (v1); continue; }
-        if (t2 == Forward_tag) { v2 = Forward_val (v2); continue; }
-        if (t1 == Infix_tag) t1 = Closure_tag;
-        if (t2 == Infix_tag) t2 = Closure_tag;
+        if (t1 == Lazy_tag) { if (forward_lazy_value(&v1)) continue; }
+        else if (t1 == Infix_tag) t1 = Closure_tag;
+        if (t2 == Lazy_tag) { if (forward_lazy_value(&v2)) continue; }
+        else if (t2 == Infix_tag) t2 = Closure_tag;
         if (t1 != t2)
             return (intnat)t1 - (intnat)t2;
     }
     switch(t1) {
-    case Forward_tag: {
-        v1 = Forward_val (v1);
-        v2 = Forward_val (v2);
-        continue;
-    }
     case String_tag: {
       mlsize_t len1, len2;
       int res;
@@ -270,6 +271,11 @@ static intnat do_compare_val(struct compare_stack* stk,
       if (res != 0) return res;
       break;
     }
+    case Lazy_tag:
+      /* TODO: Check nothing is fishy with comparison of nested lazys,
+         some of which are already forced */
+      if (forward_lazy_value(&v1) + forward_lazy_value(&v2) > 0) continue;
+      /* fall through */
     default: {
       mlsize_t sz1 = Wosize_val(v1);
       mlsize_t sz2 = Wosize_val(v2);

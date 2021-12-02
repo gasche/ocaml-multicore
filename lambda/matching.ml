@@ -1889,6 +1889,7 @@ let code_force_lazy = get_mod_field "CamlinternalLazy" "force_gen"
    Forward(val_out_of_heap).
 *)
 
+TODO
 let inline_lazy_force_cond arg loc =
   let idarg = Ident.create_local "lzarg" in
   let varg = Lvar idarg in
@@ -1930,6 +1931,7 @@ let inline_lazy_force_cond arg loc =
                   (* ... arg *)
                   varg ) ) ) )
 
+TODO
 let inline_lazy_force_switch arg loc =
   let idarg = Ident.create_local "lzarg" in
   let varg = Lvar idarg in

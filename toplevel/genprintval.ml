@@ -322,21 +322,8 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
           | Tconstr (path, [ty_arg], _)
             when Path.same path Predef.path_lazy_t ->
              let obj_tag = O.tag obj in
-             (* Lazy values are represented in three possible ways:
-
-                1. a lazy thunk that is not yet forced has tag
-                   Obj.lazy_tag
-
-                2. a lazy thunk that has just been forced has tag
-                   Obj.forward_tag; its first field is the forced
-                   result, which we can print
-
-                3. when the GC moves a forced trunk with forward_tag,
-                   or when a thunk is directly created from a value,
-                   we get a third representation where the value is
-                   directly exposed, without the Obj.forward_tag
-                   (if its own tag is not ambiguous, that is neither
-                   lazy_tag nor forward_tag)
+             (* See stdlib/lazy.ml for the representation of lazy
+                values.
 
                 Note that using Lazy.is_val and Lazy.force would be
                 unsafe, because they use the Obj.* functions rather
@@ -345,6 +332,7 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                 (debugger/printval instantiates Genprintval.Make with
                 an Obj module talking over a socket).
               *)
+TODO
              if obj_tag = Obj.lazy_tag then Oval_stuff "<lazy>"
              else begin
                  let forced_obj =

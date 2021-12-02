@@ -22,23 +22,25 @@
 *)
 
 
-(* We make use of two special tags provided by the runtime:
-   [lazy_tag] and [forward_tag].
+(* We make use of a special tag provided by the runtime, [lazy_tag].
 
-   A value of type ['a Lazy.t] can be one of three things:
-   1. A block of size 1 with tag [lazy_tag].  Its field is a closure of
-      type [unit -> 'a] that computes the value.
-   2. A block of size 1 with tag [forward_tag].  Its field is the value
-      of type ['a] that was computed.
-   3. Anything else except a float.  This has type ['a] and is the value
-      that was computed.
-   Exceptions are stored in format (1).
-   The GC will magically change things from (2) to (3) according to its
+   A value of type ['a Lazy.t] can be one of four things:
+   1. A block of size 2 with tag [lazy_tag], and:
+   1a. the first field is a closure of type [unit -> 'a] that computes
+       the value, and the second field is ready to receive a value.
+   1b. the first field is Forward, and the second field is the value
+       of type ['a] that was computed.
+   1c. the first field is Forcing, which denotes a block which is
+       locked by a thread until it receives a value.
+   2. Anything else except a float. This has type ['a] and is the
+      value that was computed.
+   Exceptions are stored in format (1a).
+   The GC will magically change things from (1b) to (2) according to its
    fancy.
 
    If OCaml was configured with the -flat-float-array option (which is
    currently the default), the following is also true:
-   We cannot use representation (3) for a [float Lazy.t] because
+   We cannot use representation (2) for a [float Lazy.t] because
    [caml_make_array] assumes that only a [float] value can have tag
    [Double_tag].
 
@@ -50,26 +52,29 @@
 type 'a t = 'a CamlinternalLazy.t
 
 exception Undefined = CamlinternalLazy.Undefined
-external make_forward : 'a -> 'a lazy_t = "caml_lazy_make_forward"
+
 external force : 'a t -> 'a = "%lazy_force"
 
 let force_val l = CamlinternalLazy.force_gen ~only_val:true l
 
 let from_fun (f : unit -> 'arg) =
   let x = Obj.new_block Obj.lazy_tag 1 in
-  Obj.set_field x 0 (Obj.repr f);
+  Obj.set_field x 0 (Obj.repr f) ;
+  Obj.set_field x 1 (Obj.repr ()) ;
   (Obj.obj x : 'arg t)
+
+let make_forward = CamlinternalLazy.make_forward
 
 let from_val (v : 'arg) =
   let t = Obj.tag (Obj.repr v) in
-  if t = Obj.forward_tag || t = Obj.lazy_tag ||
-     t = Obj.forcing_tag || t = Obj.double_tag then begin
+  if t = Obj.lazy_tag || t = Obj.double_tag then
     make_forward v
-  end else begin
+  else
     (Obj.magic v : 'arg t)
-  end
 
-let is_val (l : 'arg t) = Obj.tag (Obj.repr l) <> Obj.lazy_tag
+let is_val = CamlinternalLazy.is_val
+
+(* Below are deprecated *)
 
 let lazy_from_fun = from_fun
 

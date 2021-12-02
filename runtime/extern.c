@@ -755,18 +755,10 @@ static void extern_rec(struct caml_extern_state* s, value v)
     tag_t tag = Tag_hd(hd);
     mlsize_t sz = Wosize_hd(hd);
 
-    if (tag == Forward_tag) {
-      value f = Forward_val (v);
-      if (Is_block (f)
-          && (   Tag_val (f) == Forward_tag
-              || Tag_val (f) == Lazy_tag
-              || Tag_val (f) == Forcing_tag
-#ifdef FLAT_FLOAT_ARRAY
-              || Tag_val (f) == Double_tag
-#endif
-              )){
-        /* Do not short-circuit the pointer. */
-      }else{
+    if (tag == Lazy_tag) {
+      value f = caml_lazy_shortcut_val (v);
+      if (0 != f) {
+        /* Short-circuit the pointer. */
         v = f;
         continue;
       }

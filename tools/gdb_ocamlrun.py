@@ -1,11 +1,10 @@
 import gdb
 
 TAGS = {
-    246: 'Lazy_tag',
     247: 'Closure_tag',
     248: 'Object_tag',
     249: 'Infix_tag',
-    250: 'Forward_tag',
+    250: 'Lazy_tag',
     251: 'Abstract_tag',
     252: 'String_tag',
     253: 'Double_tag',

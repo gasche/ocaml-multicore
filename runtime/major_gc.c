@@ -669,19 +669,9 @@ static void mark_slice_darken(struct mark_stack* stk, value v, mlsize_t i,
         caml_darken_cont(child);
         *work -= Wosize_hd(chd);
       } else {
-    again:
-        if (Tag_hd(chd) == Lazy_tag || Tag_hd(chd) == Forcing_tag){
-          if(!atomic_compare_exchange_strong(Hp_atomic_val(child), &chd,
-                With_status_hd(chd, global.MARKED))){
-                  chd = Hd_val(child);
-                  goto again;
-          }
-        } else {
-          atomic_store_explicit(
-            Hp_atomic_val(child),
-            With_status_hd(chd, global.MARKED),
-            memory_order_relaxed);
-        }
+        atomic_store_explicit(Hp_atomic_val(child),
+                              With_status_hd(chd, global.MARKED),
+                              memory_order_relaxed);
         if(Tag_hd(chd) < No_scan_tag){
           mark_stack_push(stk, child, 0, work);
         } else {
@@ -790,7 +780,7 @@ intnat ephe_mark (intnat budget, uintnat for_cycle,
                   /* Forces ephemerons and their data to be alive */
                   int force_alive)
 {
-  value v, data, key, f, todo;
+  value v, data, key, todo;
   value* prev_linkp;
   header_t hd;
   mlsize_t size, i;
@@ -825,23 +815,18 @@ intnat ephe_mark (intnat budget, uintnat for_cycle,
       key = Field(v, i);
     ephemeron_again:
       if (key != caml_ephe_none && Is_block(key)) {
-        if (Tag_val(key) == Forward_tag) {
-          f = Forward_val(key);
-          if (Is_block(f)) {
-            if (Tag_val(f) == Forward_tag || Tag_val(f) == Lazy_tag ||
-                Tag_val(f) == Forcing_tag || Tag_val(f) == Double_tag) {
-              /* Do not short-circuit the pointer */
-            } else {
-              Field(v, i) = key = f;
-              goto ephemeron_again;
-            }
+        if (Tag_val(key) == Lazy_tag) {
+          value shortcut_val = caml_lazy_shortcut_val(key);
+          if (0 != shortcut_val) {
+            /* Short-circuit the pointer */
+            Field(v, i) = key = shortcut_val;
+            goto ephemeron_again;
           }
         }
-        else {
-          if (Tag_val (key) == Infix_tag) key -= Infix_offset_val (key);
-          if (is_unmarked (key))
+        else if (Tag_val (key) == Infix_tag)
+          key -= Infix_offset_val (key);
+        if (is_unmarked (key))
             alive_data = 0;
-        }
       }
     }
     budget -= Whsize_wosize(i);

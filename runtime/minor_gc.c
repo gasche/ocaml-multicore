@@ -223,7 +223,7 @@ static int try_update_object_header(value v, value *p, value result,
 }
 
 /* Note that the tests on the tag depend on the fact that Infix_tag,
-   Forward_tag, and No_scan_tag are contiguous. */
+   Lazy_tag, and No_scan_tag are contiguous. */
 static void oldify_one (void* st_v, value v, value *p)
 {
   struct oldify_state* st = st_v;
@@ -327,30 +327,37 @@ static void oldify_one (void* st_v, value v, value *p)
   } else {
     value f;
     tag_t ft;
-    CAMLassert (tag == Forward_tag);
+    CAMLassert (tag == Lazy_tag);
     CAMLassert (infix_offset == 0);
 
-    f = Forward_val (v);
+    f = caml_lazy_forward_val(v);
     ft = 0;
 
-    if (Is_block (f)) {
+    if ((0 != f) && Is_block (f)) {
       ft = Tag_val (get_header_val(f) == 0 ? Field(f, 0) : f);
     }
 
-    if (ft == Forward_tag || ft == Lazy_tag ||
-        ft == Forcing_tag || ft == Double_tag) {
+    if (0 == f || ft == Lazy_tag || ft == Double_tag) {
       /* Do not short-circuit the pointer.  Copy as a normal block. */
-      CAMLassert (Wosize_hd (hd) == 1);
+      /* The short-circuiting logic is duplicated below. */
+      value field0;
+      CAMLassert (Wosize_hd (hd) == 2);
       st->live_bytes += Bhsize_hd(hd);
-      result = alloc_shared(st->domain, 1, Forward_tag);
+      result = alloc_shared(st->domain, 2, Lazy_tag);
+      field0 = Field(v, 0);
       if( try_update_object_header(v, p, result, 0) ) {
-        p = Op_val (result);
-        v = f;
-        goto tail_call;
+        /* NOTE: this can be optimised as a tail call if necessary,
+           since we can introduce the mild assumption that at most one
+           of the two fields is a block (if result is a block
+           then set thunk to Forward). */
+        Field(result, 0) = field0;
+        Field(result, 1) = st->todo_list;
+        st->todo_list = v;
       } else {
         *Hp_val(result) = Make_header(1, No_scan_tag, global.MARKED);
         #ifdef DEBUG
         Field(result, 0) = Val_long(1);
+        Field(result, 1) = Val_long(1);
         #endif
       }
     } else {
@@ -358,6 +365,16 @@ static void oldify_one (void* st_v, value v, value *p)
       goto tail_call;               /*  then oldify. */
     }
   }
+}
+
+// declared in mlvalues.h
+value caml_lazy_shortcut_val(value l)
+{
+  value f = caml_lazy_forward_val(l);
+  if ((0 != f) && (Is_long(f) || (Tag_val(f) != Lazy_tag
+                                  && Tag_val(f) != Double_tag)))
+    return f;
+  return 0;
 }
 
 /* Finish the work that was put off by [oldify_one].

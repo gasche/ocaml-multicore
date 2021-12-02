@@ -565,12 +565,14 @@ and transl_exp0 ~in_new_scope ~scopes e =
            true) gets compiled as itself. *)
          transl_exp ~scopes e
       | `Float_that_cannot_be_shortcut ->
+TODO
           (* We don't need to wrap with Popaque: this forward
              block will never be shortcutted since it points to a float
              and Config.flat_float_array is true. *)
           Lprim(Pmakeblock(Obj.forward_tag, Immutable, None),
                 [transl_exp ~scopes e], of_location ~scopes e.exp_loc)
       | `Identifier `Forward_value ->
+TODO
          (* CR-someday mshinwell: Consider adding a new primitive
             that expresses the construction of forward_tag blocks.
             We need to use [Popaque] here to prevent unsound
