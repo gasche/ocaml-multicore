@@ -1875,130 +1875,17 @@ let get_mod_field modname field =
          | path, _ -> transl_value_path Loc_unknown env path
        ))
 
-let code_force_lazy_block = get_mod_field "CamlinternalLazy" "force_lazy_block"
-
 let code_force_lazy = get_mod_field "CamlinternalLazy" "force_gen"
 
-(* inline_lazy_force inlines the beginning of the code of Lazy.force. When
-   the value argument is tagged as:
-   - forward, take field 0
-   - lazy || forcing, call the primitive that forces
-   - anything else, return it
-
-   Using Lswitch below relies on the fact that the GC does not shortcut
-   Forward(val_out_of_heap).
-*)
-
-TODO
-let inline_lazy_force_cond arg loc =
-  let idarg = Ident.create_local "lzarg" in
-  let varg = Lvar idarg in
-  let tag = Ident.create_local "tag" in
-  let force_fun = Lazy.force code_force_lazy_block in
-  let test_tag t =
-    Lprim(Pintcomp Ceq, [Lvar tag; Lconst(Const_base(Const_int t))], loc)
-  in
-
-  Llet
-    ( Strict,
-      Pgenval,
-      idarg,
-      arg,
-      Llet
-        ( Alias,
-          Pgenval,
-          tag,
-          Lprim (Pccall prim_obj_tag, [ varg ], loc),
-          Lifthenelse
-            ( (* if (tag == Obj.forward_tag) then varg.(0) else ... *)
-              test_tag Obj.forward_tag,
-              Lprim (Pfield (0, Pointer, Mutable), [ varg ], loc),
-              Lifthenelse
-                (
-                  (* ... if tag == Obj.lazy_tag || tag == Obj.forcing_tag then
-                         Lazy.force varg
-                       else ... *)
-                  Lprim (Psequor,
-                       [test_tag Obj.lazy_tag; test_tag Obj.forcing_tag], loc),
-                  Lapply
-                    { ap_tailcall = Default_tailcall;
-                      ap_loc = loc;
-                      ap_func = force_fun;
-                      ap_args = [ varg ];
-                      ap_inlined = Default_inline;
-                      ap_specialised = Default_specialise
-                    },
-                  (* ... arg *)
-                  varg ) ) ) )
-
-TODO
-let inline_lazy_force_switch arg loc =
-  let idarg = Ident.create_local "lzarg" in
-  let varg = Lvar idarg in
-  let force_fun = Lazy.force code_force_lazy_block in
-  Llet
-    ( Strict,
-      Pgenval,
-      idarg,
-      arg,
-      Lifthenelse
-        ( Lprim (Pisint, [ varg ], loc),
-          varg,
-          Lswitch
-            ( Lprim (Pccall prim_obj_tag, [ varg ], loc),
-              { sw_numblocks = 0;
-                sw_blocks = [];
-                sw_numconsts = 256;
-                (* PR#6033 - tag ranges from 0 to 255 *)
-                sw_consts =
-                  [ (Obj.forward_tag, Lprim (Pfield(0, Pointer, Mutable),
-                                             [ varg ], loc));
-
-                    (Obj.lazy_tag,
-                      Lapply
-                        { ap_tailcall = Default_tailcall;
-                          ap_loc = loc;
-                          ap_func = force_fun;
-                          ap_args = [varg];
-                          ap_inlined = Default_inline;
-                          ap_specialised = Default_specialise
-                        } );
-
-                    (Obj.forcing_tag,
-                      Lapply
-                        { ap_tailcall = Default_tailcall;
-                          ap_loc = loc;
-                          ap_func = force_fun;
-                          ap_args = [ varg ];
-                          ap_inlined = Default_inline;
-                          ap_specialised = Default_specialise
-                        } )
-                  ];
-                sw_failaction = Some varg
-              },
-              loc ) ) )
-
 let inline_lazy_force arg loc =
-  if !Clflags.afl_instrument then
-    (* Disable inlining optimisation if AFL instrumentation active,
-       so that the GC forwarding optimisation is not visible in the
-       instrumentation output.
-       (see https://github.com/stedolan/crowbar/issues/14) *)
-    Lapply
-      { ap_tailcall = Default_tailcall;
-        ap_loc = loc;
-        ap_func = Lazy.force code_force_lazy;
-        ap_args = [ Lconst (Const_base (Const_int 0)); arg ];
-        ap_inlined = Default_inline;
-        ap_specialised = Default_specialise
-      }
-  else if !Clflags.native_code then
-    (* Lswitch generates compact and efficient native code *)
-    inline_lazy_force_switch arg loc
-  else
-    (* generating bytecode: Lswitch would generate too many rather big
-         tables (~ 250 elts); conditionals are better *)
-    inline_lazy_force_cond arg loc
+  Lapply
+    { ap_tailcall = Default_tailcall;
+      ap_loc = loc;
+      ap_func = Lazy.force code_force_lazy;
+      ap_args = [ Lconst (Const_base (Const_int 0)); arg ];
+      ap_inlined = Default_inline;
+      ap_specialised = Default_specialise
+    }
 
 let get_expr_args_lazy ~scopes head (arg, _mut) rem =
   let loc = head_loc ~scopes head in
