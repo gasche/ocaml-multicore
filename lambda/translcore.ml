@@ -559,31 +559,33 @@ and transl_exp0 ~in_new_scope ~scopes e =
       (* when e needs no computation (constants, identifiers, ...), we
          optimize the translation just as Lazy.lazy_from_val would
          do *)
+      let loc = of_location ~scopes e.exp_loc in
       begin match Typeopt.classify_lazy_argument e with
       | `Constant_or_function ->
         (* A constant expr (of type <> float if [Config.flat_float_array] is
            true) gets compiled as itself. *)
          transl_exp ~scopes e
       | `Float_that_cannot_be_shortcut ->
-TODO
           (* We don't need to wrap with Popaque: this forward
              block will never be shortcutted since it points to a float
              and Config.flat_float_array is true. *)
-          Lprim(Pmakeblock(Obj.forward_tag, Immutable, None),
-                [transl_exp ~scopes e], of_location ~scopes e.exp_loc)
+          Lprim(Pmakeblock(Obj.lazy_tag, Immutable, None),
+                [Const_base (Const_int 1); (* Forward *)
+                 transl_exp ~scopes e],
+               loc)
       | `Identifier `Forward_value ->
-TODO
          (* CR-someday mshinwell: Consider adding a new primitive
-            that expresses the construction of forward_tag blocks.
+            that expresses the construction of forward blocks.
             We need to use [Popaque] here to prevent unsound
             optimisation in Flambda, but the concept of a mutable
             block doesn't really match what is going on here.  This
             value may subsequently turn into an immediate... *)
-         Lprim (Popaque,
-                [Lprim(Pmakeblock(Obj.forward_tag, Immutable, None),
-                       [transl_exp ~scopes e],
-                       of_location ~scopes e.exp_loc)],
-                of_location ~scopes e.exp_loc)
+          Lprim (Popaque,
+                 [Lprim(Pmakeblock(Obj.lazy_tag, Mutable, None),
+                        [Const_base (Const_int 1); (* Forward *)
+                         transl_exp ~scopes e],
+                        loc)],
+                 loc)
       | `Identifier `Other ->
          transl_exp ~scopes e
       | `Other ->
@@ -592,10 +594,12 @@ TODO
                              params= [Ident.create_local "param", Pgenval];
                              return = Pgenval;
                              attr = default_function_attribute;
-                             loc = of_location ~scopes e.exp_loc;
+                             loc;
                              body = transl_exp ~scopes e} in
-          Lprim(Pmakeblock(Config.lazy_tag, Mutable, None), [fn],
-                of_location ~scopes e.exp_loc)
+          Lprim(Pmakeblock(Config.lazy_tag, Mutable, None),
+                [fn;
+                 Const_base (Const_int 0)],
+                loc)
       end
   | Texp_object (cs, meths) ->
       let cty = cs.cstr_type in
