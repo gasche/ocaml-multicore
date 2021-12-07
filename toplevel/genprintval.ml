@@ -331,39 +331,49 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                 would thus crash if called from the toplevel
                 (debugger/printval instantiates Genprintval.Make with
                 an Obj module talking over a socket).
-              *)
-TODO
-             if obj_tag = Obj.lazy_tag then Oval_stuff "<lazy>"
-             else begin
-                 let forced_obj =
-                   if obj_tag = Obj.forward_tag then O.field obj 0 else obj
-                 in
-                 (* calling oneself recursively on forced_obj risks
-                    having a false positive for cycle detection;
-                    indeed, in case (3) above, the value is stored
-                    as-is instead of being wrapped in a forward
-                    pointer. It means that, for (lazy "foo"), we have
-                      forced_obj == obj
-                    and it is easy to wrongly print (lazy <cycle>) in such
-                    a case (PR#6669).
+             *)
+             let lazy_thunk = Oval_stuff "<lazy>" in
+             let forward_block v =
+               Oval_constr (Oide_ident (Out_name.create "lazy"), [v])
+             in
+             (* Note: calling oneself recursively on forced_values risks
+                having a false positive for cycle detection;
+                indeed, in case [obj_tag <> Obj.lazy_tag], the value
+                is stored  as-is instead of being wrapped in a forward
+                pointer. It means that, for (lazy "foo"), we have
+                  forced_obj == obj
+                and it is easy to wrongly print (lazy <cycle>) in such
+                a case (PR#6669).
 
-                    Unfortunately, there is a corner-case that *is*
-                    a real cycle: using unboxed types one can define
+                Unfortunately, there is a corner-case that *is*
+                a real cycle: using unboxed types one can define
 
-                       type t = T : t Lazy.t -> t [@@unboxed]
-                       let rec x = lazy (T x)
+                   type t = T : t Lazy.t -> t [@@unboxed]
+                   let rec x = lazy (T x)
 
-                    which creates a Forward_tagged block that points to
-                    itself. For this reason, we still "nest"
-                    (detect head cycles) on forward tags.
-                  *)
+                which creates a Forward_tagged block that points to
+                itself. For this reason, we still "nest"
+                (detect head cycles) on forwarding blocks.
+             *)
+             if obj_tag <> Obj.lazy_tag then begin
+               let v =
+                 (* no forwarding block: no cycle detection *)
+                 tree_of_val depth obj ty_arg in
+               forward_block v
+             end else begin
+               let thunk_status =
+                 (Obj.magic (O.field obj 0) : O.t CamlinternalLazy.thunk_status)
+               in
+               let result = O.field obj 1 in
+               if thunk_status = CamlinternalLazy.Forward then begin
                  let v =
-                   if obj_tag = Obj.forward_tag
-                   then nest tree_of_val depth forced_obj ty_arg
-                   else      tree_of_val depth forced_obj ty_arg
-                 in
-                 Oval_constr (Oide_ident (Out_name.create "lazy"), [v])
-               end
+                   (* forwarding block: [nest] for cycle detection *)
+                   nest tree_of_val depth result ty_arg in
+                 forward_block v
+               end else
+                 (* the thunk_status is Forcing or an inlining thunk *)
+                 lazy_thunk
+             end
           | Tconstr(path, ty_list, _) -> begin
               try
                 let decl = Env.find_type path env in
